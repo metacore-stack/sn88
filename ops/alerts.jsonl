@@ -1,0 +1,2 @@
+{"ts":"2026-09-02T00:06:38.877858+00:00","key":"cash_band","severity":"warn","action":"alert","message":"cash 0.0933 > 0.01 - the multiplier is linear (0.9067x)","context":{},"constants_fingerprint":"1901c4ea96b6dfa7"}
+{"ts":"2026-09-02T00:06:38.878291+00:00","key":"inactivity","severity":"page","action":"alert","message":"5 calendar days since the last rebalance - the DEC multiplier is 0.9375x","context":{},"constants_fingerprint":"1901c4ea96b6dfa7"}

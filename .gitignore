@@ -1,0 +1,19 @@
+# Upstream SN88 repo — cloned separately, has its own git history and a .venv.
+# Clone it yourself:  git clone https://github.com/mobiusfund/investing
+investing/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Large cached pulls. /daily1 is ~325 MB; rebuild with tools/ instead of committing.
+*.d1.json
+/tmp/
+
+# Local editor/OS noise
+.DS_Store
+.idea/
+.vscode/
