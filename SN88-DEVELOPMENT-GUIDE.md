@@ -1292,7 +1292,55 @@ train_window · validate_window · cost_assumptions · result · accept/reject r
 Then correct for the search: Probability of Backtest Overfitting, the Deflated Sharpe Ratio, White's
 Reality Check, Hansen's SPA. A model enters production only if it survives most walk-forward
 periods, higher-cost assumptions, parameter perturbation, removal of its best sessions, and every
-regime — **and beats equal weight and inverse volatility through the replica.**
+regime — **and beats a shape-matched null through the replica** (§19.1).
+
+### 19.1 Power first, then search
+
+Everything above assumes the data can resolve the effect you are looking for. On SN88's own
+replication track it cannot, and the arithmetic says so before any code runs: `score ∝ Sharpe^4.8`,
+so a **1.5× Sharpe difference is a 7× score difference**, and 314 sessions hold roughly **six
+non-overlapping 50-session windows** — two per half. Ordinary regime variation is amplified past
+anything a search on this panel can distinguish.
+
+This is not a warning in the abstract. It was measured, after a searched 10-day sector-neutral
+reversal returned 8.859 on a properly held-out block against a 2.021 "null bar" — an apparent 4×
+edge that survived a disjoint train/test split, and was false:
+
+```
+reversal 10d  (searched from 80 configs, frozen, held out)    8.859
+random 100 names, same book shape, seed 1                    14.040   <- beats it
+random 100 names, same book shape, seeds 2,3            3.078 / 3.631
+shuffled reversal, same book shape, seeds 1-3     3.613 / 4.833 / 4.494
+```
+
+Two failures compounded, and both are common enough to name:
+
+1. **The null had a different book shape.** The bar was 20 names equal-weighted; the candidate held
+   100 names inverse-vol. The score pays richly for diversification (`vol^0.85` with `Sharpe^4.8`),
+   so most of the "edge" was book construction credited to signal.
+2. **The null was a point, not a distribution.** A no-signal book of the right shape spans 3.1–14.0
+   across seeds. Any single number inside that range is unfalsifiable.
+
+**The rule.** Before searching a family, measure what *no signal at all* scores at the same book
+shape — same `top_n`, same weighting, same rebalance cadence — across at least eight seeds. That
+spread is the resolution floor. If the effect you are hunting is smaller than the floor, the search
+cannot find it and will return noise with a confident face. `sn88_replica.signals` provides
+`shape_matched_null()` and `exceeds_null()`; a candidate must clear the **entire** null spread, not
+its median, because at two independent windows anything less is not distinguishable from luck.
+
+The same test applied to book shape itself: holding one trivial signal fixed, the best shape is
+524-equal on sessions 100–207, 100-inverse-vol on 207–314, and 50-equal on 157–314. It is not
+stable, so it is not knowable here either.
+
+**What this implies for the build order.** The binding constraint is sample size, not model
+quality, and more search on this panel produces more confident wrong answers rather than better
+ones. Effort belongs in the **long-regime track** (§30) and in the operational reliability that
+§21–§29 cover — uptime, correct fills, surviving rule changes — all of which pay off with no
+statistical power required at all. See `research/README.md` for the full sequence.
+
+**A caveat on the caveat.** None of this says no edge exists. It says *this panel cannot certify
+one*. A signal with a strong economic prior may well be worth running in shadow (§24 stage 7) on
+exactly the reasoning that the backtest is uninformative in both directions.
 
 ## 20. Test plan
 
@@ -1417,7 +1465,7 @@ register something that cannot be watched or stopped.
 | **7** | **10–20 sessions of shadow operation** — the full loop publishing to a log, reconciled daily against the replica's projection. | Projected vs would-be-realised score agrees within tolerance; zero unhandled faults. |
 | **8** | **Register** with the validated baseline. Refresh daily including weekends. | `a` column reads **1**; `last_active` ≤ 1; submission confirmed. |
 | **9** | **Field intelligence (§17)** — projected rank, distance monitor, rule-change detector, rival decomposition. | Predicts today's `bin/validator` output before it runs. |
-| **10** | **Forecasting and macro challengers (§10)**, promoted only through §31. | Edge survives every walk-forward period at 2× costs, measured in mode B. |
+| **10** | **Forecasting and macro challengers (§10)**, promoted only through §31. **Run the §19.1 power check before searching, not after.** | Edge survives every walk-forward period at 2× costs in mode B **and clears the entire shape-matched null spread** (§19.1). On the 314-session replication panel nothing has yet cleared it, so expect this stage to gate on data rather than on modelling. |
 | **11** | **Adjust risk** — only on statistically defensible live evidence, within the §12 constrained search and the §11.2 stress suite. | Attribution (§32) shows the change came from alpha, not beta. |
 
 **Why a 10–20 session shadow, and not the six months r2 proposed nor the zero r3 implied.** The
@@ -1437,6 +1485,12 @@ inconsistency.
 - **A signal chosen by its family name.** §2.7 — measure realised post-cost skew and let the replica
   rank it. Do not adopt momentum because it is standard, and do not reject it because it is called
   momentum.
+- **A signal compared against a differently-shaped null.** §19.1 — a 100-name inverse-vol book beat
+  a 20-name equal-weight "bar" by 4× on held-out data with *no signal in it at all*. Match `top_n`,
+  weighting and cadence, or you are measuring book construction and calling it alpha.
+- **More search on the 314-session panel.** §19.1 — it holds ~6 non-overlapping windows and
+  `score ∝ Sharpe^4.8`. The search does not fail loudly; it returns confident noise. Spend the
+  effort on the long-regime track and on uptime instead.
 - **A fixed volatility target — in either direction.** §2.2 and §12: scale is a search variable
   under survival constraints, not a number you pick. Neither "target 12%" nor "maximise feasible"
   is a policy.

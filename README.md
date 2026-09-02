@@ -248,6 +248,27 @@ daunting in the units you actually optimise.
 Note also `zero% = 28%` for equal weight: in more than a quarter of rolling windows a null book
 scores *exactly zero*, because the window closed negative and `score <= 0 -> 0`.
 
+### Read that table as a scale, not a target
+
+**2.021 is one cell of a table that moves by 100× across it, and the panel cannot say which
+cell is right.** Same signal, same code, only the block of sessions and the book shape varying:
+
+| region | 20 names, equal | 50 names, equal | 100 names, inv-vol |
+|---|---:|---:|---:|
+| sessions 100–207 | 0.000 | 0.000 | 0.021 |
+| sessions 207–314 | 0.032 | 0.319 | 6.413 |
+| sessions 157–314 | **2.021** | 5.492 | 2.720 |
+
+And a book of **randomly chosen** names on that last shape scores between 3.1 and 14.0 depending
+only on the seed. `score ∝ Sharpe^4.8` means a 1.5× Sharpe difference is a 7× score difference,
+and 314 sessions contain roughly six non-overlapping 50-session windows — so regime variation is
+amplified past anything a search on this panel can resolve.
+
+So use the ladder above for its **last column** — the Sharpe multiples, which are stable and are
+the units you actually optimise — and do not treat any single score as a measured quantity. A
+candidate is only interesting if it clears `shape_matched_null()` (below), and on this panel
+nothing yet does. See [research/README.md](research/README.md).
+
 ## What the tests encode
 
 `tests/test_properties.py` pins the scoring algebra the rest of the system reasons from. If one

@@ -89,3 +89,31 @@ selection.
 `lab.py`, `mr_lab.py`, `robust.py`, `sweep.py`, `mr/` are partial output from an earlier
 agent sweep, kept only as raw material. **They predate the fill-timing fix and their
 numbers are wrong.** Do not quote them.
+
+### 4. `identifiability.py` — the resolution floor, measured
+
+Twelve no-signal draws at a fixed book shape (100 names, inverse-vol), against four candidates
+evaluated identically:
+
+```
+B  sessions 207-314            C  sessions 157-314
+  12 no-signal draws:            12 no-signal draws:
+    min 1.87  med 3.07  max 14.04   min 0.00  med 1.30  max 5.41
+  reversal 10d   8.859  83rd pct    reversal 10d   5.637  100th pct  CLEARS
+  reversal 1d    8.009  83rd pct    reversal 1d    3.287   83rd pct
+  liquidity      6.413  75th pct    liquidity      3.254   83rd pct
+  low-vol        2.567  25th pct    low-vol        0.044    8th pct
+```
+
+**The null spread is wider than the spread across candidates.** In block B the twelve no-signal
+draws range over 7.5× while the four candidates range over 3.5×; the entire candidate family fits
+inside the noise. That is the definition of an underpowered experiment, and it means the *ranking*
+of those candidates carries no information either.
+
+`reversal 10d` does clear all twelve draws in block C — by 4%, in one of two blocks, at the 83rd
+percentile in the other, from a family that was searched over 80 configs, on a block that overlaps
+the one used to pick it. That is not evidence; it is what the tail of a null looks like.
+
+A caveat worth keeping: **none of this shows there is no edge.** It shows this panel cannot
+certify one, in either direction. A signal with a strong economic prior is still a legitimate
+candidate for shadow operation on exactly that reasoning.

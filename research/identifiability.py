@@ -34,13 +34,18 @@ for label, sf in [("B  sessions 207-314", 207/314), ("C  sessions 157-314", 0.5)
              "reversal 1d": rev(1), "reversal 10d": rev(10)}
     cs = {k: evaluate(f, FULL, **kw).median for k, f in cands.items()}
     print(f"\n{label}   book: 100 names, inverse-vol")
-    print(f"  {SEEDS} NO-SIGNAL draws: min {nulls[0]:.2f}  median {statistics.median(nulls):.2f}"
-          f"  max {nulls[-1]:.2f}   spread {nulls[-1]/max(nulls[0],1e-9):.1f}x")
+    med = statistics.median(nulls)
+    # ratio to the MEDIAN, not the min: a null draw of exactly 0.0 is common (the window
+    # closed negative) and min-relative spread then explodes to a meaningless 1e9.
+    spread = nulls[-1] / med if med > 0 else float("inf")
+    print(f"  {SEEDS} NO-SIGNAL draws: min {nulls[0]:.2f}  median {med:.2f}"
+          f"  max {nulls[-1]:.2f}   max/median {spread:.1f}x")
     print(f"  candidates:")
     for k, v in sorted(cs.items(), key=lambda x: -x[1]):
         pct = 100.0 * sum(1 for n in nulls if n < v) / len(nulls)
         flag = "CLEARS" if exceeds_null(v, nulls) else "inside null"
         print(f"    {k:<14}{v:>8.3f}   {pct:>3.0f}th pct of null   {flag}")
-    cspread = max(cs.values()) / max(min(cs.values()), 1e-9)
-    print(f"  candidate spread {cspread:.1f}x  vs  null spread {nulls[-1]/max(nulls[0],1e-9):.1f}x"
-          f"   -> {'NOT identifiable' if nulls[-1]/max(nulls[0],1e-9) >= cspread else 'identifiable'}")
+    cmed = statistics.median(cs.values())
+    cspread = max(cs.values()) / cmed if cmed > 0 else float("inf")
+    print(f"  candidate max/median {cspread:.1f}x  vs  null max/median {spread:.1f}x"
+          f"   -> {'NOT identifiable' if spread >= cspread else 'identifiable'}")
