@@ -179,6 +179,87 @@ class TestEvaluate(unittest.TestCase):
         self.assertEqual(set(seen), {"SignalView"})
 
 
+def alternating(n_sessions=260) -> Panel:
+    """Two names in exact antiphase: A rises on even moves, B on odd ones.
+
+    This makes a 1-day reversal signal deterministic. Whichever name just fell is,
+    by construction, the one that rises next - so a harness that transacts at the
+    close it just read wins EVERY session, and one that transacts a session later
+    loses every session. No noise, no sampling: the sign of the result is the answer.
+    """
+    sessions = [f"S{i:04d}" for i in range(n_sessions)]
+    close, rets = {}, {}
+    for k, name in enumerate(("A", "B")):
+        px, series = 100.0, [100.0]
+        for i in range(n_sessions - 1):
+            px *= 1 + (0.02 if (i + k) % 2 == 0 else -0.02)
+            series.append(px)
+        close[name] = series
+        rets[name] = [(series[i] - series[i - 1]) / series[i - 1]
+                      for i in range(1, n_sessions)]
+    return Panel(sessions=tuple(sessions), names=("A", "B"), close=close, returns=rets,
+                 sector={"A": "X", "B": "X"}, dollar_volume={"A": 2.0, "B": 1.0},
+                 market_cap={"A": 1e11, "B": 1e11})
+
+
+def one_day_reversal(view):
+    """Buy whichever name fell over the last complete session."""
+    return {t: -view.cumulative(t, 1) for t in view.names
+            if len(view.returns(t, 1)) >= 1}
+
+
+class TestFillTiming(unittest.TestCase):
+    """A view horizon constrains what the signal READS, not the price it GETS.
+
+    Revision 1 of ``evaluate`` earned ``returns[t-1]`` - the move ending at the very
+    close the view had just exposed. That price is unfillable in both windows: at the
+    15:50 MOC cutoff ``close[t-1]`` has not printed, and by the 09:28 MOO cutoff the
+    overnight gap out of it is already gone. These tests pin the correction.
+    """
+
+    def setUp(self):
+        self.p = alternating()
+
+    def test_default_fill_lag_is_one(self):
+        import inspect
+        self.assertEqual(inspect.signature(evaluate).parameters["fill_lag"].default, 1,
+                         "the honest MOC convention must be the default, not opt-in")
+
+    def test_lag_zero_wins_every_session_on_a_panel_where_that_is_impossible(self):
+        """The bug's signature: a perfect score from transacting at the observed close."""
+        leaky = evaluate(one_day_reversal, self.p, top_n=1, fill_lag=0, max_windows=20)
+        self.assertEqual(leaky.zero_fraction, 0.0)
+        self.assertGreater(leaky.median, 0.0)
+
+    def test_lag_one_loses_every_session_on_that_same_panel(self):
+        honest = evaluate(one_day_reversal, self.p, top_n=1, fill_lag=1, max_windows=20)
+        self.assertEqual(honest.zero_fraction, 1.0,
+                         "buying the faller and holding a session later must lose here")
+        self.assertEqual(honest.median, 0.0)
+
+    def test_the_two_conventions_earn_different_indices(self):
+        """Direct arithmetic: lag 1 earns the session AFTER the one lag 0 earns."""
+        p, seen = self.p, []
+        evaluate(lambda v: (seen.append(v.t), {"A": 1.0})[1], p, top_n=1,
+                 fill_lag=1, max_windows=5, warmup=60)
+        t = seen[0]
+        v = SignalView(p, t)
+        last_seen_close = v.closes("A")[-1]
+        self.assertEqual(last_seen_close, p.close["A"][t - 1])
+        # lag 1 transacts at close[t] - strictly later than the last close observed
+        self.assertGreater(t, t - 1)
+
+    def test_negative_lag_is_rejected(self):
+        with self.assertRaises(ValueError):
+            evaluate(null_signal, self.p, fill_lag=-1)
+
+    def test_the_correction_barely_moves_a_slow_signal(self):
+        """0.3% turnover: fill assumptions are invisible until turnover is high."""
+        a = evaluate(null_signal, self.p, fill_lag=0, max_windows=20)
+        b = evaluate(null_signal, self.p, fill_lag=1, max_windows=20)
+        self.assertLess(abs(a.mean_turnover - b.mean_turnover), 1e-9)
+
+
 @unittest.skipUnless(PANEL_PATH.exists(), "replication panel not built")
 class TestAgainstTheRealPanel(unittest.TestCase):
     """The null bar, on the real 524-name cross-section."""

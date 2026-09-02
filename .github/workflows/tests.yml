@@ -1,0 +1,58 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # No install step: the replica is pure standard library, and the whole test
+      # suite runs against committed fixtures with zero network calls.
+      - name: Full suite (offline)
+        env:
+          SN88_OFFLINE: "1"
+        run: python -m unittest discover -s tests -v
+
+      # Called out separately because these MUST fail the build. Guide 20: three
+      # earlier revisions shipped look-ahead bugs, and every one of them made the
+      # numbers look better - which is why nobody goes hunting for them.
+      - name: Leakage probes
+        env:
+          SN88_OFFLINE: "1"
+        run: |
+          python -m unittest -v \
+            tests.test_leakage \
+            tests.test_replay.TestLeakageProbes \
+            tests.test_replay.TestSnapshotSeparation \
+            tests.test_replay.TestReplayEngineAndLookaheadProof \
+            tests.test_signals.TestViewHorizon \
+            tests.test_dataplane.TestPointInTime
+
+      - name: Assert the suite made no network calls
+        env:
+          SN88_OFFLINE: "1"
+        run: |
+          python - <<'PY'
+          import unittest, urllib.request
+          calls = []
+          orig = urllib.request.urlopen
+          urllib.request.urlopen = lambda *a, **k: (calls.append(a[0]), orig(*a, **k))[1]
+          suite = unittest.TestLoader().discover("tests")
+          unittest.TextTestRunner(verbosity=0, stream=open("/dev/null", "w")).run(suite)
+          assert not calls, f"suite made {len(calls)} network call(s): {calls[:3]}"
+          print("no network calls - fixtures are self-contained")
+          PY

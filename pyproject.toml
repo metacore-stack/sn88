@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sn88-replica"
+version = "0.9.0"
+description = "An exact replica of the Bittensor SN88 scoring pipeline, plus the operational system around it"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+# Deliberately none. The replica is pure standard library so it can run on the
+# production miner host without pulling numpy, pandas or bittensor onto a box
+# that holds a hotkey.
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed to run tests/test_against_upstream.py, which diffs against the real
+# etc.score(). Note bittensor is NOT required - only api.py imports it, and only
+# for logging.
+upstream = ["numpy>=2", "pandas==2.2.3", "sqlalchemy>=2", "requests>=2"]
+
+[tool.setuptools]
+packages = ["sn88_replica"]
+
+[tool.setuptools.package-data]
+sn88_replica = ["py.typed"]

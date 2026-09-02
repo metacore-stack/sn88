@@ -5,7 +5,7 @@ view is the enforcement mechanism: for a MOO decision on session ``t`` it expose
 returns only through ``t-1``, because the opening auction has not run and today's bar
 does not exist yet. There is no argument a signal can pass to widen that.
 
-Two rules the harness imposes rather than suggests:
+Three rules the harness imposes rather than suggests:
 
 * **Rank through the replica, never through Sharpe or IC.** Selecting on those
   systematically favours signals whose payoff the outlier clip then confiscates, and
@@ -13,12 +13,23 @@ Two rules the harness imposes rather than suggests:
 * **Weights are rebuilt every session from information available then.** Nothing is
   fitted on the evaluation window. A signal that needs calibration must do it inside
   the view, from data the view exposes.
+* **You transact one close LATER than the close you looked at** (``fill_lag=1``). A
+  view horizon alone does not make a backtest honest - it constrains what the signal
+  reads, not what price it gets. Deciding at the 15:50 MOC cutoff on session ``t`` you
+  know ``close[t-1]`` and you fill at ``close[t]``; you never fill at ``close[t-1]``,
+  because under MOC it has not printed and under MOO the overnight gap has already
+  gone. Revision 1 of this module filled at ``close[t-1]``. That is corrected, and
+  ``test_signals.TestFillTiming`` now pins it.
 
 The bar to beat is the null strategy: equal weight over the 20 most liquid non-cash
-names scores a median of **2.112** out-of-sample across 53 rolling windows on the
+names scores a median of **2.021** out-of-sample across 53 rolling windows on the
 524-name replication panel, and would rank about **50 of 151** on the live board. It
-also scores **exactly zero in 32% of windows**, because a window that closes negative
+also scores **exactly zero in 28% of windows**, because a window that closes negative
 scores zero - cutting that fraction is itself a large win. See ``tools/baseline_bar.py``.
+
+The fill correction barely moves the null (0.3% turnover, 2.112 -> 2.021) and moves fast
+signals enormously - which is the general lesson: fill assumptions are invisible until
+turnover is high, and then they dominate.
 """
 
 from __future__ import annotations
@@ -209,6 +220,7 @@ def evaluate(
     no_trade_band: float = 0.0,
     max_windows: int | None = 60,
     warmup: int = 60,
+    fill_lag: int = 1,
 ) -> EvalResult:
     """Walk forward, rebalancing from the view, and score through the replica.
 
@@ -221,7 +233,15 @@ def evaluate(
             opportunities count as zero realised turnover, so ``mean_turnover`` is
             turnover per opportunity rather than per executed trade.
         warmup: minimum complete sessions before the signal is called at all.
+        fill_lag: sessions between the last OBSERVED close and the TRANSACTED close.
+            Must be >= 1. The default of 1 is the honest MOC convention: deciding at
+            15:50 on session ``t`` you know ``close[t-1]`` and you fill at ``close[t]``.
+            ``fill_lag=0`` transacts at the very close the signal just looked at, which
+            is unfillable in both windows, and is permitted only so a test can measure
+            the difference. See the module docstring.
     """
+    if fill_lag < 0:
+        raise ValueError("fill_lag must be >= 1; 0 is unfillable and negative is a leak")
     n_sessions = len(panel.sessions)
     begin = max(warmup + 1, int(n_sessions * start_frac))
     equity = INITIAL_EQUITY
@@ -230,7 +250,7 @@ def evaluate(
     turnovers: list[float] = []
     holdings: list[int] = []
 
-    for t in range(begin, n_sessions - 1):
+    for t in range(begin, n_sessions - 1 - max(0, fill_lag - 1)):
         if not weights or (t - begin) % max(1, rebalance_every) == 0:
             view = SignalView(panel, t)
             scores = signal(view)
@@ -250,9 +270,12 @@ def evaluate(
         if not weights:
             continue
         holdings.append(len(weights))
-        # returns[t-1] is the move from session t-1 to session t: the book held into t
-        step = sum(w * panel.returns[k][t - 1] for k, w in weights.items()
-                   if t - 1 < len(panel.returns[k]))
+        # The signal saw closes through t-1. With fill_lag=1 the book is established at
+        # close[t] and earns close[t] -> close[t+1], so returns index t. Filling at
+        # close[t-1] (lag 0) would transact at the price the signal just read.
+        j = t - 1 + fill_lag
+        step = sum(w * panel.returns[k][j] for k, w in weights.items()
+                   if j < len(panel.returns[k]))
         equity *= 1 + step
         curve.append(equity)
 
