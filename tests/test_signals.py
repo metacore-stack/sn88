@@ -21,9 +21,13 @@ from sn88_replica.signals import (        # noqa: E402
     SignalView,
     equal_weight_top,
     evaluate,
+    exceeds_null,
     inverse_vol_top,
     load_panel,
     null_signal,
+    random_signal,
+    shape_matched_null,
+    shuffled,
 )
 
 PANEL_PATH = (Path(__file__).resolve().parent.parent / "fixtures"
@@ -258,6 +262,54 @@ class TestFillTiming(unittest.TestCase):
         a = evaluate(null_signal, self.p, fill_lag=0, max_windows=20)
         b = evaluate(null_signal, self.p, fill_lag=1, max_windows=20)
         self.assertLess(abs(a.mean_turnover - b.mean_turnover), 1e-9)
+
+
+class TestShapeMatchedNulls(unittest.TestCase):
+    """Against the error that a 20-name equal-weight bar cannot judge a 100-name book."""
+
+    def setUp(self):
+        self.p = synthetic(n_names=12, n_sessions=300)
+
+    def test_random_signal_is_deterministic_per_seed(self):
+        a, b = random_signal(3), random_signal(3)
+        v = SignalView(self.p, 100)
+        self.assertEqual(a(v), b(v))
+        self.assertNotEqual(a(v), random_signal(4)(v))
+
+    def test_random_signal_scores_every_name(self):
+        self.assertEqual(set(random_signal(1)(SignalView(self.p, 100))), set(self.p.names))
+
+    def test_shuffle_preserves_the_value_multiset_and_moves_it(self):
+        base = lambda v: {t: float(i) for i, t in enumerate(v.names)}
+        v = SignalView(self.p, 100)
+        original, permuted = base(v), shuffled(base, 5)(v)
+        self.assertEqual(sorted(original.values()), sorted(permuted.values()),
+                         "a shuffle must destroy the mapping, not the distribution")
+        self.assertEqual(set(original), set(permuted))
+        self.assertNotEqual(original, permuted)
+
+    def test_shuffle_of_an_empty_signal_stays_empty(self):
+        self.assertEqual(shuffled(lambda v: {}, 1)(SignalView(self.p, 100)), {})
+
+    def test_null_draws_come_back_sorted(self):
+        d = shape_matched_null(self.p, seeds=4, top_n=5, max_windows=10)
+        self.assertEqual(len(d), 4)
+        self.assertEqual(list(d), sorted(d))
+
+    def test_exceeds_null_requires_clearing_the_whole_spread(self):
+        draws = (1.0, 2.0, 9.0)
+        self.assertFalse(exceeds_null(5.0, draws), "beating the median is not enough")
+        self.assertFalse(exceeds_null(9.0, draws), "tying the best is not enough")
+        self.assertTrue(exceeds_null(9.1, draws))
+
+    def test_no_null_draws_means_no_claim(self):
+        self.assertFalse(exceeds_null(1e9, ()))
+
+    def test_a_pure_noise_candidate_does_not_clear_its_own_nulls(self):
+        """The property that makes this a real control rather than a formality."""
+        kw = dict(top_n=5, weighting="inverse_vol", max_windows=12)
+        cand = evaluate(random_signal(99), self.p, **kw).median
+        self.assertFalse(exceeds_null(cand, shape_matched_null(self.p, seeds=6, **kw)))
 
 
 @unittest.skipUnless(PANEL_PATH.exists(), "replication panel not built")

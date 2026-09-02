@@ -1,0 +1,83 @@
+import sys, math, itertools, json
+sys.path.insert(0, "/home/newuser/Documents/sn88/research/mr")
+from lib import *
+from multiprocessing import Pool
+
+def ranks(d):
+    """map -> rank in [0,1], higher value = higher rank."""
+    order = sorted(d, key=lambda t: (d[t], t))
+    n = len(order) - 1 or 1
+    return {t: i / n for i, t in enumerate(order)}
+
+def make(H=3, K=200, gap=0, vol_adj=False, neutral="none", volscreen=1.0,
+         volw=0.0, vlook=20):
+    uni = LIQ[:K]
+    need = max(H + gap, vlook, 60 if neutral == "beta" else 0) + 2
+    def sig(view):
+        if not view.enough_history(need):
+            return {}
+        rev, vol = {}, {}
+        for t in uni:
+            r = view.returns(t, H + gap)
+            if len(r) < H + gap:
+                continue
+            seg = r[:H] if gap else r
+            c = 1.0
+            for x in seg:
+                c *= 1 + x
+            c -= 1.0
+            v = fast_vol(view.returns(t, vlook))
+            if v <= 1e-6:
+                continue
+            vol[t] = v
+            rev[t] = c / v if vol_adj else c
+        if len(rev) < 40:
+            return {}
+        if neutral == "sector":
+            b = {}
+            for t in rev:
+                b.setdefault(SEC.get(t, "?"), []).append(t)
+            out = {}
+            for s, ts in b.items():
+                m = sum(rev[t] for t in ts) / len(ts)
+                for t in ts:
+                    out[t] = rev[t] - m
+            rev = out
+        elif neutral == "beta":
+            m = sum(rev.values()) / len(rev)
+            out = {}
+            for t in rev:
+                bt = max(0.2, min(2.5, view.beta(t, "SPY", 60)))
+                out[t] = rev[t] - bt * m
+            rev = out
+        if volscreen < 1.0:
+            cut = sorted(vol.values())[max(0, int(len(vol) * volscreen) - 1)]
+            rev = {t: v for t, v in rev.items() if vol[t] <= cut}
+            if len(rev) < 25:
+                return {}
+        if volw:
+            rr = ranks({t: -rev[t] for t in rev})      # higher = more reverted (loser)
+            vr = ranks({t: -vol[t] for t in rev})      # higher = lower vol
+            return {t: (1 - volw) * rr[t] + volw * vr[t] for t in rev}
+        return {t: -v for t, v in rev.items()}
+    return sig
+
+def job(cfg):
+    name = " ".join(f"{k}={v}" for k, v in cfg.items())
+    r = run(make(**cfg), name)
+    return (r.median, r.p25, r.p75, r.zero_fraction, r.mean_turnover, name)
+
+if __name__ == "__main__":
+    grid = []
+    for H in (1, 2, 3, 5, 8, 10):
+        for K in (60, 100, 150, 250, 400, 524):
+            for va in (False, True):
+                for nt in ("none", "sector"):
+                    grid.append(dict(H=H, K=K, vol_adj=va, neutral=nt))
+    with Pool(4) as p:
+        res = p.map(job, grid)
+    res.sort(reverse=True)
+    with open("/home/newuser/Documents/sn88/research/mr/grid2.out", "w") as f:
+        for m, p25, p75, z, to, n in res:
+            f.write(f"{m:9.3f} {p25:8.3f} {p75:9.3f} zero{z:5.0%} to{to:5.0%}  {n}\n")
+    print(len(res), "done")

@@ -52,6 +52,10 @@ __all__ = [
     "equal_weight_top",
     "inverse_vol_top",
     "load_panel",
+    "random_signal",
+    "shuffled",
+    "shape_matched_null",
+    "exceeds_null",
 ]
 
 WIN = 50
@@ -306,3 +310,78 @@ def evaluate(
 def null_signal(view: SignalView) -> dict[str, float]:
     """Equal weight over the most liquid names - the bar every signal must clear."""
     return {t: view.panel.dollar_volume.get(t, 0.0) for t in view.names}
+
+
+# --- shape-matched nulls ----------------------------------------------------
+#
+# The error this exists to prevent, committed once already: a searched 10-day
+# reversal on a 100-name inverse-vol book scored 8.859 against a 2.021 "null bar" and
+# looked like a 4x edge. The null bar was a 20-name EQUAL-weight book. Holding the
+# shape fixed and destroying only the signal, the same book scored 3.1-14.0 - so the
+# candidate sat inside its own null distribution and the apparent edge was entirely
+# diversification, which the score's vol^0.85 / Sharpe^4.8 structure pays for richly.
+#
+# A candidate must therefore be compared against a no-signal book of IDENTICAL shape:
+# same top_n, same weighting, same rebalance cadence. Anything else attributes book
+# construction to signal.
+
+
+def random_signal(seed: int) -> Signal:
+    """Uniform noise. Same book shape, no information whatsoever."""
+    import random
+
+    def f(view: SignalView) -> dict[str, float]:
+        rng = random.Random(seed * 7919 + view.t)
+        return {t: rng.random() for t in view.names}
+
+    return f
+
+
+def shuffled(signal: Signal, seed: int) -> Signal:
+    """The candidate's own score DISTRIBUTION, assigned to the wrong names.
+
+    A stricter null than uniform noise: it preserves the dispersion and skew of the
+    candidate's scores and destroys only the name-to-score mapping.
+    """
+    import random
+
+    def f(view: SignalView) -> dict[str, float]:
+        scores = signal(view)
+        if not scores:
+            return {}
+        vals = list(scores.values())
+        random.Random(seed * 100003 + view.t).shuffle(vals)
+        return dict(zip(sorted(scores), vals))
+
+    return f
+
+
+def shape_matched_null(
+    panel: Panel,
+    *,
+    signal: Signal | None = None,
+    seeds: int = 8,
+    **eval_kwargs,
+) -> tuple[float, ...]:
+    """Median scores of ``seeds`` no-signal books with the SAME shape as the candidate.
+
+    Pass the same ``top_n``/``weighting``/``rebalance_every``/``start_frac`` you gave
+    :func:`evaluate`. With ``signal`` supplied the nulls are shuffles of that signal;
+    without it they are uniform noise. Returns the medians sorted ascending, so a
+    candidate can be placed against them as a percentile rather than a point estimate.
+    """
+    out = []
+    for k in range(seeds):
+        null = shuffled(signal, k + 1) if signal is not None else random_signal(k + 1)
+        out.append(evaluate(null, panel, name=f"null{k}", **eval_kwargs).median)
+    return tuple(sorted(out))
+
+
+def exceeds_null(candidate: float, null_medians: Sequence[float]) -> bool:
+    """True only if the candidate beats EVERY shape-matched null draw.
+
+    Deliberately strict. With 50-session windows on ~100 sessions there are roughly two
+    independent observations, so anything less than "clears the whole null spread" is
+    not distinguishable from luck at this sample size.
+    """
+    return bool(null_medians) and candidate > max(null_medians)
