@@ -40,6 +40,8 @@ jobs:
             tests.test_replay.TestSnapshotSeparation \
             tests.test_replay.TestReplayEngineAndLookaheadProof \
             tests.test_signals.TestViewHorizon \
+            tests.test_signals.TestFillTiming \
+            tests.test_signals.TestShapeMatchedNulls \
             tests.test_dataplane.TestPointInTime
 
       - name: Assert the suite made no network calls
